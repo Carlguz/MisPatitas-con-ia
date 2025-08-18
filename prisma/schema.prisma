@@ -1,0 +1,335 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+enum UserRole {
+  ADMIN
+  SELLER
+  WALKER
+  CUSTOMER
+}
+
+enum OrderStatus {
+  PENDING
+  CONFIRMED
+  IN_PROGRESS
+  COMPLETED
+  CANCELLED
+  REFUNDED
+}
+
+enum PaymentStatus {
+  PENDING
+  PAID
+  FAILED
+  REFUNDED
+}
+
+enum ServiceStatus {
+  AVAILABLE
+  BOOKED
+  IN_PROGRESS
+  COMPLETED
+  CANCELLED
+}
+
+model User {
+  id            String   @id @default(cuid())
+  email         String   @unique
+  password      String
+  name          String?
+  phone         String?
+  avatar        String?
+  role          UserRole @default(CUSTOMER)
+  isActive      Boolean  @default(true)
+  emailVerified Boolean  @default(false)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  // Relaciones
+  sellerProfile   Seller?
+  walkerProfile   Walker?
+  customerProfile Customer?
+  orders          Order[]
+  reviews         Review[]
+  notifications   Notification[]
+  bookings        Booking[]
+  
+  @@map("users")
+}
+
+model Seller {
+  id          String @id @default(cuid())
+  userId      String @unique
+  storeName   String
+  description String?
+  address     String?
+  phone       String?
+  logo        String?
+  isApproved  Boolean @default(false)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  user     User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  products Product[]
+  
+  @@map("sellers")
+}
+
+model Walker {
+  id          String @id @default(cuid())
+  userId      String @unique
+  name        String
+  description String?
+  phone       String?
+  address     String?
+  avatar      String?
+  experience  Int?    // años de experiencia
+  pricePerHour Float   // precio por hora
+  isAvailable Boolean  @default(true)
+  isApproved  Boolean  @default(false)
+  whatsapp    String?  // número de WhatsApp
+  whatsappEnabled Boolean @default(false) // si el WhatsApp está habilitado para clientes
+  whatsappPaid Boolean @default(false)   // si el paseador ha pagado por el servicio de WhatsApp
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  user        User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  services    Service[]
+  schedules   Schedule[]
+  socialLinks SocialLink[]
+  reviews     Review[]
+  bookings    Booking[]
+  
+  @@map("walkers")
+}
+
+model Customer {
+  id        String @id @default(cuid())
+  userId    String @unique
+  address   String?
+  phone     String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  reviews Review[]
+  
+  @@map("customers")
+}
+
+model ProductCategory {
+  id          String @id @default(cuid())
+  name        String @unique
+  description String?
+  image       String?
+  isActive    Boolean @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  products Product[]
+  
+  @@map("product_categories")
+}
+
+model Product {
+  id          String @id @default(cuid())
+  name        String
+  description String?
+  price       Float
+  stock       Int    @default(0)
+  images      String? // JSON array de URLs de imágenes
+  isActive    Boolean @default(true)
+  sellerId    String
+  categoryId  String
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  seller   Seller           @relation(fields: [sellerId], references: [id], onDelete: Cascade)
+  category ProductCategory  @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+  items    OrderItem[]
+  reviews  Review[]
+  
+  @@map("products")
+}
+
+model Service {
+  id          String       @id @default(cuid())
+  name        String
+  description String?
+  price       Float
+  duration    Int          // duración en minutos
+  isActive    Boolean      @default(true)
+  walkerId    String
+  status      ServiceStatus @default(AVAILABLE)
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
+
+  walker  Walker  @relation(fields: [walkerId], references: [id], onDelete: Cascade)
+  bookings Booking[]
+  reviews  Review[]
+  items    OrderItem[]
+  
+  @@map("services")
+}
+
+model Schedule {
+  id        String   @id @default(cuid())
+  walkerId  String
+  dayOfWeek Int      // 0-6 (Domingo-Sábado)
+  startTime String   // formato HH:mm
+  endTime   String   // formato HH:mm
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  walker Walker @relation(fields: [walkerId], references: [id], onDelete: Cascade)
+  
+  @@unique([walkerId, dayOfWeek, startTime])
+  @@map("schedules")
+}
+
+model SocialLink {
+  id        String @id @default(cuid())
+  walkerId  String
+  platform  String // instagram, facebook, twitter, etc.
+  url       String
+  isActive  Boolean @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  walker Walker @relation(fields: [walkerId], references: [id], onDelete: Cascade)
+  
+  @@unique([walkerId, platform])
+  @@map("social_links")
+}
+
+model Order {
+  id            String      @id @default(cuid())
+  orderNumber   String      @unique
+  customerId    String
+  totalAmount   Float
+  status        OrderStatus @default(PENDING)
+  paymentStatus PaymentStatus @default(PENDING)
+  notes         String?
+  createdAt     DateTime    @default(now())
+  updatedAt     DateTime    @updatedAt
+
+  customer User       @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  items    OrderItem[]
+  payments Payment[]
+  bookings Booking[]
+  
+  @@map("orders")
+}
+
+model OrderItem {
+  id           String @id @default(cuid())
+  orderId      String
+  productId    String?
+  serviceId    String?
+  quantity     Int    @default(1)
+  price        Float
+  subtotal     Float
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  order   Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  product Product? @relation(fields: [productId], references: [id], onDelete: Cascade)
+  service Service? @relation(fields: [serviceId], references: [id], onDelete: Cascade)
+  
+  @@map("order_items")
+}
+
+model Booking {
+  id          String     @id @default(cuid())
+  orderId     String?
+  serviceId   String
+  customerId  String
+  walkerId    String
+  date        DateTime
+  startTime   String     // formato HH:mm
+  endTime     String     // formato HH:mm
+  status      ServiceStatus @default(BOOKED)
+  notes       String?
+  totalPrice  Float
+  createdAt   DateTime   @default(now())
+  updatedAt   DateTime   @updatedAt
+
+  order   Order?   @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  service Service @relation(fields: [serviceId], references: [id], onDelete: Cascade)
+  customer User    @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  walker  Walker  @relation(fields: [walkerId], references: [id], onDelete: Cascade)
+  
+  @@map("bookings")
+}
+
+model Payment {
+  id            String        @id @default(cuid())
+  orderId       String
+  amount        Float
+  method        String        // stripe, paypal, etc.
+  transactionId String?
+  status        PaymentStatus @default(PENDING)
+  createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
+
+  order Order @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  
+  @@map("payments")
+}
+
+model Review {
+  id        String   @id @default(cuid())
+  userId    String
+  customerId String?
+  productId String?
+  serviceId String?
+  walkerId  String?
+  rating    Int      // 1-5
+  comment   String?
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user    User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  customer Customer? @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  product Product? @relation(fields: [productId], references: [id], onDelete: Cascade)
+  service Service? @relation(fields: [serviceId], references: [id], onDelete: Cascade)
+  walker  Walker?  @relation(fields: [walkerId], references: [id], onDelete: Cascade)
+  
+  @@map("reviews")
+}
+
+model Notification {
+  id        String   @id @default(cuid())
+  userId    String
+  title     String
+  message   String
+  type      String   // info, success, warning, error
+  isRead    Boolean  @default(false)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  @@map("notifications")
+}
+
+model SystemConfig {
+  id          String @id @default(cuid())
+  key         String @unique
+  value       String
+  description String?
+  updatedAt   DateTime @updatedAt
+  
+  @@map("system_configs")
+}
