@@ -1,0 +1,23 @@
+name: Prisma DB Push
+on:
+  workflow_dispatch:
+  push:
+    branches: ["main"]
+    paths:
+      - "prisma/**"
+      - "prisma/schema.prisma"
+
+jobs:
+  dbpush:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - run: npm install
+      - run: npx prisma generate
+      - name: Prisma db push
+        env:
+          DIRECT_URL: ${{ postgresql://postgres:[YOUR-PASSWORD]@db.zuxuxqealrejvbchtlpe.supabase.co:5432/postgres }}
+        run: npx prisma db push
