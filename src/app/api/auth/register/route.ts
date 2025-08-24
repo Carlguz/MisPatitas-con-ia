@@ -1,8 +1,9 @@
+export const runtime = 'nodejs'
 import { NextRequest, NextResponse } from "next/server"
 import { db } from "@/lib/db"
 import bcrypt from "bcryptjs"
 import { UserRole } from "@prisma/client"
-export const runtime = 'nodejs';
+;
 
 
 export async function POST(request: NextRequest) {
