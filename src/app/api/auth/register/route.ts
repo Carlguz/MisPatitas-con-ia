@@ -8,7 +8,7 @@ import { UserRole } from "@prisma/client";
 function mapRole(input: unknown): UserRole {
   const r = String(input ?? "").trim().toLowerCase();
   if (["paseador", "dog_walker", "dog walker", "walker", "paseador(a)"].includes(r)) {
-    return UserRole.DOG_WALKER;
+    return UserRole.WALKER;
   }
   if (["cliente", "customer", "usuario", "user"].includes(r)) {
     return UserRole.CUSTOMER;
@@ -47,19 +47,54 @@ export async function POST(request: NextRequest) {
     // Hash
     const hashedPassword = await bcrypt.hash(password, 12);
 
-    // Crear usuario con enum correcto
-    const created = await db.user.create({
-      data: {
-        email,
-        name,
-        phone: phone ?? null,
-        role: mapRole(role), // 👈 aquí el enum correcto
-        password: hashedPassword,
-      },
-      select: { id: true, email: true, role: true, name: true },
+    // Usar una transacción para crear el usuario y su perfil asociado
+    const userRole = mapRole(role);
+
+    const createdUser = await db.$transaction(async (prisma) => {
+      const user = await prisma.user.create({
+        data: {
+          email,
+          name,
+          phone: phone ?? null,
+          role: userRole,
+          password: hashedPassword,
+        },
+        select: { id: true, email: true, role: true, name: true },
+      });
+
+      // Crear el perfil correspondiente
+      if (userRole === UserRole.WALKER) {
+        await prisma.walker.create({
+          data: {
+            userId: user.id,
+            name: user.name ?? "Walker",
+            phone: phone,
+            pricePerHour: 20,
+            // otros campos por defecto
+          },
+        });
+      } else if (userRole === UserRole.SELLER) {
+        await prisma.seller.create({
+          data: {
+            userId: user.id,
+            storeName: `${user.name}'s Store`,
+            // otros campos por defecto
+          },
+        });
+      } else {
+        // Por defecto, se crea un perfil de cliente
+        await prisma.customer.create({
+          data: {
+            userId: user.id,
+            phone: phone,
+          },
+        });
+      }
+
+      return user;
     });
 
-    return NextResponse.json({ ok: true, user: created }, { status: 201 });
+    return NextResponse.json({ ok: true, user: createdUser }, { status: 201 });
   } catch (err: any) {
     console.error("REGISTER_ERROR:", err);
     // Exponer mensaje mínimo para depurar si vuelve a fallar

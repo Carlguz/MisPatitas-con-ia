@@ -7,10 +7,6 @@ const globalForPrisma = globalThis as unknown as {
 export const db =
   globalForPrisma.prisma ??
   new PrismaClient({
-    // Fuerza la URL pooled (6543) en runtime:
-    datasources: {
-      db: { url: process.env.DATABASE_URL! },
-    },
     log: ['warn', 'error'], // si quieres, quita 'query' para no llenar logs
   })
 
