@@ -149,15 +149,42 @@ CREATE POLICY "Users can upload their own images" ON storage.objects
 
 ## 7. Variables de Entorno para Producción (Vercel)
 
-Cuando despliegues en Vercel, agrega estas variables en tu configuración:
+Cuando despliegues en Vercel, es **crucial** configurar correctamente todas las variables de entorno, especialmente las de la base de datos que Prisma utiliza.
 
+Ve a tu proyecto en Vercel → Settings → Environment Variables y añade lo siguiente:
+
+### Variables de Supabase y NextAuth
 ```bash
+# Obtenidas de Supabase Project Settings -> API
 NEXT_PUBLIC_SUPABASE_URL=https://tu-proyecto-id.supabase.co
 NEXT_PUBLIC_SUPABASE_ANON_KEY=tu-clave-anonima
 SUPABASE_SERVICE_ROLE_KEY=tu-clave-de-servicio
+
+# Configuración de NextAuth
 NEXTAUTH_URL=https://tu-dominio.vercel.app
-NEXTAUTH_SECRET=tu-secreto-seguro
+NEXTAUTH_SECRET=genera-un-secreto-seguro-para-produccion
 ```
+
+### Variables de Base de Datos para Prisma
+Estas son las más importantes para evitar errores de despliegue. Las encuentras en tu proyecto de Supabase en **Project Settings → Database → Connection Info**.
+
+**1. `DATABASE_URL` (Conexión para la App en Ejecución)**
+   - **Propósito:** Usada por la aplicación para las operaciones normales (queries) después de ser desplegada. Utiliza el "Connection Pooling" de Supabase para mayor eficiencia.
+   - **Key en Vercel:** `DATABASE_URL`
+   - **Value en Vercel:** Copia la URL de la sección **"Connection pooling"** (la que usa el puerto `6543`).
+     ```
+     postgresql://postgres.[pooler-id]:[TU-PASSWORD]@aws-0-...-pooler.supabase.com:6543/postgres
+     ```
+
+**2. `DIRECT_URL` (Conexión para Migraciones)**
+   - **Propósito:** Usada exclusivamente durante el proceso de `build` en Vercel por el comando `prisma migrate deploy`. Necesita una conexión directa a la base de datos.
+   - **Key en Vercel:** `DIRECT_URL`
+   - **Value en Vercel:** Copia la URL de la sección **"Connection string"** (la que usa el puerto `5432`).
+     ```
+     postgresql://postgres:[TU-PASSWORD]@db.tu-proyecto-id.supabase.co:5432/postgres
+     ```
+
+**¡Recuerda reemplazar `[TU-PASSWORD]` con tu contraseña real de la base de datos!**
 
 ## 8. Troubleshooting Común
 
