@@ -138,6 +138,7 @@ export async function POST(request: NextRequest) {
         duration: parseInt(duration),
         walkerId: walker.id,
         isActive: true,
+        status: "AVAILABLE"
       },
       include: { walker: { include: { user: { select: { name: true, email: true } } } } },
     });
