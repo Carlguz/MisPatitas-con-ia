@@ -137,6 +137,7 @@ export async function POST(request: NextRequest) {
         price: parseFloat(price),
         duration: parseInt(duration),
         walkerId: walker.id,
+        isActive: true,
       },
       include: { walker: { include: { user: { select: { name: true, email: true } } } } },
     });
