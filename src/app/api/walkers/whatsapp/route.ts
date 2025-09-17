@@ -1,66 +1,87 @@
-import { NextRequest, NextResponse } from "next/server"
-import { getServerSession } from "next-auth"
-import { authOptions } from "@/lib/auth"
-import { db } from "@/lib/db"
-import { UserRole } from "@prisma/client"
+import { NextRequest, NextResponse } from "next/server";
+import { createRouteHandlerClient } from "@supabase/auth-helpers-nextjs";
+import { cookies } from "next/headers";
+import { db } from "@/lib/db";
+import { UserRole } from "@prisma/client";
 
-export async function GET() {
+// Helper para obtener el perfil de paseador
+async function getWalkerProfile(session: any) {
+  const user = await db.user.findUnique({ where: { id: session.user.id }, select: { role: true }});
+  if (user?.role !== UserRole.WALKER) {
+    return { error: new NextResponse(JSON.stringify({ error: "Forbidden: Not a Walker" }), { status: 403 }) };
+  }
+
+  const walker = await db.walker.findUnique({ where: { userId: session.user.id } });
+  if (!walker) {
+    return { error: new NextResponse(JSON.stringify({ error: "Walker profile not found" }), { status: 404 }) };
+  }
+  return { walker };
+}
+
+// GET: Obtener la configuración de WhatsApp (Protegido)
+export async function GET(request: NextRequest) {
+  const supabase = createRouteHandlerClient({ cookies });
   try {
-    const session = await getServerSession(authOptions)
-    
-    if (!session || session.user.role !== UserRole.WALKER) {
-      return NextResponse.json({ error: "No autorizado" }, { status: 401 })
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    const walker = await db.walker.findFirst({
-      where: {
-        userId: session.user.id
-      },
-      select: {
-        whatsapp: true,
-        whatsappEnabled: true,
-        whatsappPaid: true
-      }
-    })
+    const { error, walker } = await getWalkerProfile(session);
+    if (error) return error;
 
-    return NextResponse.json({ walker })
-  } catch (error) {
-    console.error("Error fetching WhatsApp config:", error)
-    return NextResponse.json({ error: "Error interno del servidor" }, { status: 500 })
+    return NextResponse.json({
+      whatsapp: walker.whatsapp,
+      whatsappEnabled: walker.whatsappEnabled,
+      whatsappPaid: walker.whatsappPaid,
+    });
+  } catch (err) {
+    console.error("Error fetching WhatsApp config:", err);
+    return NextResponse.json({ error: "Internal server error" }, { status: 500 });
   }
 }
 
+// POST: Actualizar la configuración de WhatsApp (Protegido)
 export async function POST(request: NextRequest) {
+  const supabase = createRouteHandlerClient({ cookies });
   try {
-    const session = await getServerSession(authOptions)
-    
-    if (!session || session.user.role !== UserRole.WALKER) {
-      return NextResponse.json({ error: "No autorizado" }, { status: 401 })
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    const { whatsapp, whatsappEnabled } = await request.json()
+    const { error, walker } = await getWalkerProfile(session);
+    if (error) return error;
 
-    // Validar el número de WhatsApp si se proporciona
-    if (whatsapp) {
-      const phoneRegex = /^[\d\s\-\+\(\)]+$/
-      if (!phoneRegex.test(whatsapp)) {
-        return NextResponse.json({ error: "Número de WhatsApp inválido" }, { status: 400 })
-      }
+    const body = await request.json();
+    const { whatsapp, whatsappEnabled } = body;
+
+    const updateData: { whatsapp?: string | null, whatsappEnabled?: boolean } = {};
+
+    if (whatsapp !== undefined) {
+        if (whatsapp) {
+            const phoneRegex = /^[\d\s\-\+\(\)]+$/;
+            if (!phoneRegex.test(whatsapp)) {
+                return NextResponse.json({ error: "Invalid WhatsApp number format" }, { status: 400 });
+            }
+            updateData.whatsapp = whatsapp;
+        } else {
+            updateData.whatsapp = null;
+        }
     }
 
-    const walker = await db.walker.update({
-      where: {
-        userId: session.user.id
-      },
-      data: {
-        whatsapp: whatsapp || null,
-        whatsappEnabled: whatsappEnabled || false
-      }
-    })
+    if (whatsappEnabled !== undefined) {
+        updateData.whatsappEnabled = !!whatsappEnabled;
+    }
 
-    return NextResponse.json({ walker })
-  } catch (error) {
-    console.error("Error updating WhatsApp config:", error)
-    return NextResponse.json({ error: "Error interno del servidor" }, { status: 500 })
+    const updatedWalker = await db.walker.update({
+      where: { id: walker.id },
+      data: updateData,
+    });
+
+    return NextResponse.json(updatedWalker);
+  } catch (err) {
+    console.error("Error updating WhatsApp config:", err);
+    return NextResponse.json({ error: "Internal server error" }, { status: 500 });
   }
 }

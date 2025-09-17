@@ -1,158 +1,100 @@
-import { NextRequest, NextResponse } from "next/server"
-import { getServerSession } from "next-auth"
-import { authOptions } from "@/lib/auth"
-import { db } from "@/lib/db"
-import { UserRole } from "@prisma/client"
+import { NextRequest, NextResponse } from "next/server";
+import { createRouteHandlerClient } from "@supabase/auth-helpers-nextjs";
+import { cookies } from "next/headers";
+import { db } from "@/lib/db";
+import { UserRole } from "@prisma/client";
 
+// GET: Obtener enlaces sociales (público o para el paseador)
 export async function GET(request: NextRequest) {
+  const supabase = createRouteHandlerClient({ cookies });
+  const { searchParams } = new URL(request.url);
+  const walkerIdQuery = searchParams.get("walkerId");
+
   try {
-    const session = await getServerSession(authOptions)
-    
-    if (!session) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
-    }
+    let where: any = {};
 
-    const { searchParams } = new URL(request.url)
-    const walkerId = searchParams.get("walkerId")
-
-    let where: any = {}
-    
-    // Si no se especifica walkerId, obtener los enlaces del paseador actual
-    if (!walkerId) {
-      if (session.user.role === UserRole.WALKER) {
-        const walker = await db.walker.findFirst({
-          where: { userId: session.user.id }
-        })
-        if (walker) {
-          where.walkerId = walker.id
-        }
-      } else {
-        return NextResponse.json({ error: "Walker ID required" }, { status: 400 })
-      }
+    if (walkerIdQuery) {
+      where.walkerId = walkerIdQuery;
     } else {
-      where.walkerId = walkerId
+      // Si no hay walkerId, es para el panel del paseador
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) {
+        return NextResponse.json({ error: "Unauthorized: Session required" }, { status: 401 });
+      }
+      const user = await db.user.findUnique({ where: { id: session.user.id }, select: { role: true }});
+      if (user?.role !== UserRole.WALKER) {
+         return NextResponse.json({ error: "Forbidden: Not a Walker" }, { status: 403 });
+      }
+      const walker = await db.walker.findFirst({ where: { userId: session.user.id } });
+      if (!walker) {
+        return NextResponse.json({ error: "Walker profile not found" }, { status: 404 });
+      }
+      where.walkerId = walker.id;
     }
 
     const socialLinks = await db.socialLink.findMany({
       where,
-      include: {
-        walker: {
-          select: {
-            id: true,
-            name: true,
-            user: {
-              select: {
-                name: true,
-                email: true
-              }
-            }
-          }
-        }
-      },
-      orderBy: {
-        platform: "asc"
-      }
-    })
+      orderBy: { platform: "asc" },
+    });
 
-    return NextResponse.json({ socialLinks })
-
+    return NextResponse.json({ socialLinks });
   } catch (error) {
-    console.error("Error fetching social links:", error)
-    return NextResponse.json(
-      { error: "Internal server error" },
-      { status: 500 }
-    )
+    console.error("Error fetching social links:", error);
+    return NextResponse.json({ error: "Internal server error" }, { status: 500 });
   }
 }
 
+// POST: Crear un nuevo enlace social (Protegido)
 export async function POST(request: NextRequest) {
+  const supabase = createRouteHandlerClient({ cookies });
+
   try {
-    const session = await getServerSession(authOptions)
-    
-    if (!session || session.user.role !== UserRole.WALKER) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    const body = await request.json()
-    const { platform, url } = body
-
-    // Validaciones
-    if (!platform || !url) {
-      return NextResponse.json(
-        { error: "Platform and URL are required" },
-        { status: 400 }
-      )
+    const user = await db.user.findUnique({ where: { id: session.user.id }, select: { role: true }});
+    if (user?.role !== UserRole.WALKER) {
+      return NextResponse.json({ error: "Forbidden: Not a Walker" }, { status: 403 });
     }
 
-    // Validar formato de URL
-    try {
-      new URL(url)
-    } catch {
-      return NextResponse.json(
-        { error: "Invalid URL format" },
-        { status: 400 }
-      )
-    }
-
-    // Verificar que el paseador tenga un perfil
-    const walker = await db.walker.findFirst({
-      where: { userId: session.user.id }
-    })
-
+    const walker = await db.walker.findFirst({ where: { userId: session.user.id } });
     if (!walker) {
-      return NextResponse.json(
-        { error: "Walker profile not found" },
-        { status: 403 }
-      )
+      return NextResponse.json({ error: "Walker profile not found" }, { status: 404 });
     }
 
-    // Verificar que no exista un enlace para la misma plataforma
+    const body = await request.json();
+    const { platform, url } = body;
+
+    if (!platform || !url) {
+      return NextResponse.json({ error: "Platform and URL are required" }, { status: 400 });
+    }
+    try {
+      new URL(url);
+    } catch {
+      return NextResponse.json({ error: "Invalid URL format" }, { status: 400 });
+    }
+
     const existingLink = await db.socialLink.findFirst({
-      where: {
-        walkerId: walker.id,
-        platform: platform.toLowerCase()
-      }
-    })
+      where: { walkerId: walker.id, platform: platform.toLowerCase() },
+    });
 
     if (existingLink) {
-      return NextResponse.json(
-        { error: "Social link for this platform already exists" },
-        { status: 400 }
-      )
+      return NextResponse.json({ error: "Link for this platform already exists" }, { status: 409 });
     }
 
     const socialLink = await db.socialLink.create({
       data: {
         walkerId: walker.id,
         platform: platform.toLowerCase(),
-        url
+        url,
       },
-      include: {
-        walker: {
-          select: {
-            id: true,
-            name: true,
-            user: {
-              select: {
-                name: true,
-                email: true
-              }
-            }
-          }
-        }
-      }
-    })
+    });
 
-    return NextResponse.json({
-      message: "Social link created successfully",
-      socialLink
-    })
-
+    return NextResponse.json(socialLink, { status: 201 });
   } catch (error) {
-    console.error("Error creating social link:", error)
-    return NextResponse.json(
-      { error: "Internal server error" },
-      { status: 500 }
-    )
+    console.error("Error creating social link:", error);
+    return NextResponse.json({ error: "Internal server error" }, { status: 500 });
   }
 }
