@@ -1,11 +1,11 @@
+
 import NextAuth, { User } from "next-auth";
 import { SupabaseAdapter } from "@auth/supabase-adapter";
 import CredentialsProvider from "next-auth/providers/credentials";
 import { createClient } from "@supabase/supabase-js";
 import { Adapter } from "next-auth/adapters";
-import { UserRole } from '@prisma/client'; // Importar el tipo UserRole
+import { UserRole } from '@prisma/client';
 
-// Use the SERVICE_ROLE_KEY for admin-level access
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
   process.env.SUPABASE_SERVICE_ROLE_KEY!
@@ -32,7 +32,9 @@ const handler = NextAuth({
           throw new Error("No credentials provided.");
         }
 
+        // =================================================================
         // SIGN UP LOGIC
+        // =================================================================
         if (credentials.isSignUp === 'true') {
           if (!credentials.email || !credentials.password || !credentials.name || !credentials.role) {
             throw new Error("Missing fields for sign up.");
@@ -56,20 +58,28 @@ const handler = NextAuth({
           }
 
           const user = authData.user;
-
           let profileTable = "";
+          let profileData: any = {};
+
           switch (credentials.role) {
-            case "CUSTOMER": profileTable = "customers"; break;
-            case "WALKER": profileTable = "walkers"; break;
-            case "SELLER": profileTable = "sellers"; break;
+            case "CUSTOMER":
+              profileTable = "customers";
+              profileData = { userId: user.id, phone: credentials.phone };
+              break;
+            case "WALKER":
+              profileTable = "walkers";
+              profileData = { userId: user.id, name: credentials.name, phone: credentials.phone, pricePerHour: 0 };
+              break;
+            case "SELLER":
+              profileTable = "sellers";
+              profileData = { userId: user.id, storeName: credentials.name, phone: credentials.phone };
+              break;
             default:
               await supabase.auth.admin.deleteUser(user.id);
               throw new Error("Invalid user role provided.");
           }
 
-          const { error: profileError } = await supabase
-            .from(profileTable)
-            .insert({ id: user.id, name: credentials.name, phone: credentials.phone });
+          const { error: profileError } = await supabase.from(profileTable).insert(profileData);
 
           if (profileError) {
             console.error("Profile Creation Error:", profileError.message);
@@ -81,11 +91,13 @@ const handler = NextAuth({
             id: user.id,
             email: user.email!,
             name: user.user_metadata.name,
-            role: user.user_metadata.role as UserRole, // Cast to UserRole
+            role: user.user_metadata.role as UserRole,
           };
         }
 
+        // =================================================================
         // SIGN IN LOGIC
+        // =================================================================
         if (!credentials.email || !credentials.password) {
           throw new Error("Email and password are required for sign in.");
         }
@@ -103,7 +115,7 @@ const handler = NextAuth({
           id: data.user.id,
           email: data.user.email!,
           name: data.user.user_metadata.name,
-          role: data.user.user_metadata.role as UserRole, // Cast to UserRole
+          role: data.user.user_metadata.role as UserRole,
         };
       },
     }),
