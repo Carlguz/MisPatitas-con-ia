@@ -5,6 +5,7 @@ import CredentialsProvider from "next-auth/providers/credentials"
 import { createClient } from "@supabase/supabase-js"
 import { Adapter } from "next-auth/adapters"
 
+// Use the SERVICE_ROLE_KEY for admin-level access
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
   process.env.SUPABASE_SERVICE_ROLE_KEY!
@@ -27,13 +28,20 @@ const handler = NextAuth({
         isSignUp: { label: "Is Sign Up", type: "text" },
       },
       async authorize(credentials) {
-        if (!credentials?.email || !credentials?.password) {
-          throw new Error("Email and password are required.");
+        if (!credentials) {
+          throw new Error("No credentials provided.");
         }
 
-        // Handle Sign Up
+        // =================================================================
+        // SIGN UP LOGIC
+        // =================================================================
         if (credentials.isSignUp === 'true') {
-          const { data, error } = await supabase.auth.signUp({
+          if (!credentials.email || !credentials.password || !credentials.name || !credentials.role) {
+             throw new Error("Missing fields for sign up.");
+          }
+
+          // 1. Create the user in Supabase Auth
+          const { data: authData, error: authError } = await supabase.auth.signUp({
             email: credentials.email,
             password: credentials.password,
             options: {
@@ -45,43 +53,73 @@ const handler = NextAuth({
             },
           });
 
-          if (error) {
-            console.error("Supabase Sign Up Error:", error.message);
-            // Throw a generic error to the user
-            throw new Error("Could not create user. Please try again.");
+          if (authError || !authData.user) {
+            console.error("Supabase Sign Up Error:", authError?.message);
+            throw new Error(`AUTH_SIGNUP_ERROR: ${authError?.message || "Could not create user."}`);
           }
           
-          if (data.user) {
-             // We need to manually return the user object in the shape NextAuth expects
-             // The adapter will handle linking this to the database
-            return {
-                id: data.user.id,
-                email: data.user.email,
-                name: data.user.user_metadata.name,
-            };
+          const user = authData.user;
+
+          // 2. Insert the corresponding profile in the public table
+          // This is done with service_role privileges, bypassing RLS.
+          let profileTable = "";
+          switch(credentials.role) {
+            case "CUSTOMER": profileTable = "customers"; break;
+            case "WALKER": profileTable = "walkers"; break;
+            case "SELLER": profileTable = "sellers"; break;
+            default:
+              // If role is invalid, we should delete the created user to avoid orphans
+              await supabase.auth.admin.deleteUser(user.id);
+              throw new Error("Invalid user role provided.");
           }
-          return null; // Should not happen if signUp is successful
+          
+          const { error: profileError } = await supabase
+            .from(profileTable)
+            .insert({
+              id: user.id, // Ensure UUID matches the auth user
+              name: credentials.name,
+              email: credentials.email,
+              phone: credentials.phone
+              // Add any other role-specific fields here if necessary
+            });
+
+          if (profileError) {
+            console.error("Profile Creation Error:", profileError.message);
+            // IMPORTANT: If profile creation fails, delete the auth user to prevent orphans.
+            await supabase.auth.admin.deleteUser(user.id);
+            throw new Error(`PROFILE_CREATION_ERROR: ${profileError.message}`);
+          }
+
+          // 3. Return the user object for NextAuth
+          return {
+              id: user.id,
+              email: user.email,
+              name: user.user_metadata.name,
+          };
         }
         
-        // Handle Sign In
+        // =================================================================
+        // SIGN IN LOGIC
+        // =================================================================
+        if (!credentials.email || !credentials.password) {
+          throw new Error("Email and password are required for sign in.");
+        }
+        
         const { data, error } = await supabase.auth.signInWithPassword({
           email: credentials.email,
           password: credentials.password,
         });
 
         if (error) {
-          console.error("Supabase Sign In Error:", error.message);
-          // Return null to indicate failed authentication
+          // Don't throw an error here, return null to indicate failed sign-in
           return null;
         }
 
         if (data.user) {
-          // On successful sign-in, return the user object for NextAuth
           return {
             id: data.user.id,
             email: data.user.email,
             name: data.user.user_metadata.name,
-            // any other fields you want to pass to the session
           };
         }
 
@@ -94,14 +132,12 @@ const handler = NextAuth({
   },
   callbacks: {
     async session({ session, token }) {
-      // Pass user id and other token properties to the session
       if (token) {
         session.user.id = token.id as string;
       }
       return session;
     },
     async jwt({ token, user }) {
-      // This is called after a successful sign-in
       if (user) {
         token.id = user.id;
       }
@@ -110,9 +146,7 @@ const handler = NextAuth({
   },
   pages: {
     signIn: '/auth/signin',
-    // You can add other pages like signOut, error, etc.
   },
-  // Enable debug messages in development
   debug: process.env.NODE_ENV === 'development',
 })
 
