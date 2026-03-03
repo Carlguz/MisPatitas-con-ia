@@ -19,6 +19,13 @@ export async function POST(request: NextRequest) {
   try {
     const { email, password, name, role, phone } = await request.json();
 
+    // --- DEBUGGING START ---
+    console.log("--- INICIANDO DEPURACIÓN DE REGISTRO ---");
+    console.log("URL de Supabase recibida:", process.env.NEXT_PUBLIC_SUPABASE_URL);
+    console.log("Clave Anónima de Supabase cargada:", process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ? 'Sí' : 'No');
+    console.log("Clave de Servicio de Supabase cargada:", process.env.SUPABASE_SERVICE_ROLE_KEY ? 'Sí' : 'No');
+    // --- DEBUGGING END ---
+
     if (!email || !password || !name || !role) {
       return NextResponse.json({ error: "VALIDATION_ERROR: Faltan campos requeridos." }, { status: 400 });
     }
@@ -47,6 +54,7 @@ export async function POST(request: NextRequest) {
 
     const mappedRole = mapRole(role);
 
+    console.log("Intentando registrar usuario en Supabase...");
     const { data: { user }, error: signUpError } = await supabase.auth.signUp({
       email,
       password,
@@ -54,12 +62,14 @@ export async function POST(request: NextRequest) {
     });
 
     if (signUpError) {
+      console.error("Error específico de Supabase signUp:", signUpError);
       throw new Error(`AUTH_SIGNUP_ERROR: ${signUpError.message}`);
     }
     if (!user) {
       throw new Error("AUTH_CRITICAL_ERROR: El objeto de usuario no fue devuelto tras el registro.");
     }
 
+    console.log("Usuario registrado en Auth con éxito. ID:", user.id);
     userIdForCleanup = user.id;
 
     const supabaseAdmin = createClient(
@@ -68,6 +78,7 @@ export async function POST(request: NextRequest) {
     );
 
     if (mappedRole === 'SELLER') {
+      console.log("Insertando en la tabla 'sellers'...");
       const { error: sellerError } = await supabaseAdmin.from('sellers').insert({
         userId: user.id,
         storeName: `${name}'s Store`,
@@ -77,6 +88,7 @@ export async function POST(request: NextRequest) {
         throw new Error(`DB_INSERT_SELLER_ERROR: ${sellerError.message} (Code: ${sellerError.code})`);
       }
     } else if (mappedRole === 'WALKER') {
+      console.log("Insertando en la tabla 'walkers'...");
       const { error: walkerError } = await supabaseAdmin.from('walkers').insert({
         userId: user.id,
         name: name,
@@ -89,6 +101,7 @@ export async function POST(request: NextRequest) {
       }
     }
     
+    console.log("Proceso de registro completado con éxito.");
     const finalResponse = NextResponse.json({ message: "Usuario registrado con éxito.", user }, { status: 201 });
     const cookieHeader = tempResponse.headers.get('Set-Cookie');
     if (cookieHeader) {
