@@ -1,109 +1,87 @@
 
-import { createServerClient, type CookieOptions } from '@supabase/ssr';
-import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
+import { NextRequest, NextResponse } from 'next/server';
 
-type UserRole = 'CLIENT' | 'WALKER' | 'SELLER' | 'ADMIN';
+// Mapeo de roles de entrada a los roles definidos en el ENUM de la base de datos
+// Asegúrate de que estos valores coincidan con tu ENUM 'UserRole'
+type UserRole = 'CUSTOMER' | 'WALKER' | 'SELLER';
 
 function mapRole(input: string): UserRole {
   const r = input.toLowerCase();
   if (r.includes('walker') || r.includes('paseador')) return 'WALKER';
   if (r.includes('seller') || r.includes('vendedor')) return 'SELLER';
-  return 'CLIENT';
+  return 'CUSTOMER';
 }
 
 export async function POST(request: NextRequest) {
-  let userIdForCleanup: string | null = null;
-
   try {
+    // 1. Extraer y validar los datos del cuerpo de la solicitud
     const { email, password, name, role, phone } = await request.json();
 
     if (!email || !password || !name || !role) {
-      return NextResponse.json({ error: "VALIDATION_ERROR: Faltan campos requeridos." }, { status: 400 });
+      return NextResponse.json({ error: "VALIDATION_ERROR: Faltan campos requeridos (email, password, name, role)." }, { status: 400 });
     }
 
+    // 2. Validar la configuración del servidor
     if (!process.env.NEXT_PUBLIC_SUPABASE_URL || !process.env.SUPABASE_SERVICE_ROLE_KEY) {
-      throw new Error("SERVER_CONFIG_ERROR: Las variables de entorno de Supabase no están configuradas.");
+      console.error("SERVER_CONFIG_ERROR: Las variables de entorno de Supabase no están configuradas.");
+      return NextResponse.json({ error: "SERVER_CONFIG_ERROR: Error de configuración del servidor." }, { status: 500 });
     }
 
-    // Usamos el cliente Admin para tener control total
+    // 3. Crear el cliente de Supabase Admin
+    // Se usa la SERVICE_ROLE_KEY para tener permisos para crear usuarios.
     const supabaseAdmin = createClient(
       process.env.NEXT_PUBLIC_SUPABASE_URL,
-      process.env.SUPABASE_SERVICE_ROLE_KEY
+      process.env.SUPABASE_SERVICE_ROLE_KEY,
+      { auth: { autoRefreshToken: false, persistSession: false } } // Opciones para un entorno de servidor
     );
 
+    // 4. Mapear el rol de entrada al tipo de rol de la base de datos
     const mappedRole = mapRole(role);
 
-    // Creamos el usuario directamente con el cliente admin
-    const { data: { user }, error: signUpError } = await supabaseAdmin.auth.admin.createUser({
+    // 5. Crear el nuevo usuario en Supabase Auth
+    // El trigger que hemos creado en la DB se encargará de crear el perfil público (walker, seller, etc.)
+    const { data, error: signUpError } = await supabaseAdmin.auth.admin.createUser({
       email,
       password,
-      email_confirm: true, // Marcamos el email como confirmado para evitar el problema de la clave foránea
+      email_confirm: true, // Auto-confirma el email para que el usuario pueda iniciar sesión inmediatamente
       user_metadata: { 
-        name,
-        phone,
+        // Aquí pasamos los datos que el trigger necesitará
+        name: name,
+        phone: phone,
         role: mappedRole
       },
     });
 
+    // 6. Manejar errores durante la creación del usuario
     if (signUpError) {
-      // Manejo de errores más específico para conflictos de email
-      if (signUpError.message.includes('duplicate key value') || signUpError.message.includes('already exists')) {
+      console.error('AUTH_SIGNUP_ERROR:', signUpError.message);
+      // Devolver un error específico si el email ya existe
+      if (signUpError.message.includes('already exists')) {
         return NextResponse.json({ error: "AUTH_CONFLICT_ERROR: El correo electrónico ya está registrado." }, { status: 409 });
       }
-      throw new Error(`AUTH_SIGNUP_ERROR: ${signUpError.message}`);
+      // Devolver un error genérico para otros problemas de autenticación
+      return NextResponse.json({ error: `AUTH_SIGNUP_ERROR: ${signUpError.message}` }, { status: 500 });
     }
 
-    if (!user) {
-      throw new Error("AUTH_CRITICAL_ERROR: El objeto de usuario no fue devuelto tras el registro.");
+    if (!data.user) {
+      console.error("AUTH_CRITICAL_ERROR: El objeto de usuario no fue devuelto tras el registro.");
+      return NextResponse.json({ error: "AUTH_CRITICAL_ERROR: No se pudo crear el usuario." }, { status: 500 });
     }
 
-    userIdForCleanup = user.id; // Guardamos el ID para posible limpieza en caso de error posterior
-
-    // Si el rol es Vendedor o Paseador, insertamos en la tabla correspondiente
-    if (mappedRole === 'SELLER') {
-      const { error: sellerError } = await supabaseAdmin.from('sellers').insert({
-        userId: user.id,
-        storeName: `${name}'s Store`, // Nombre de tienda por defecto
-        isApproved: false,
-      });
-      if (sellerError) {
-        throw new Error(`DB_INSERT_SELLER_ERROR: ${sellerError.message} (Code: ${sellerError.code})`);
-      }
-    } else if (mappedRole === 'WALKER') {
-      const { error: walkerError } = await supabaseAdmin.from('walkers').insert({
-        userId: user.id,
-        name: name,
-        isAvailable: true,
-        isApproved: false,
-        pricePerHour: 0, // Precio inicial por defecto
-      });
-      if (walkerError) {
-        throw new Error(`DB_INSERT_WALKER_ERROR: ${walkerError.message} (Code: ${walkerError.code})`);
-      }
-    }
-    
-    // Devolvemos una respuesta exitosa
-    return NextResponse.json({ message: "Usuario registrado con éxito.", userId: user.id }, { status: 201 });
+    // 7. Devolver una respuesta exitosa
+    // El trabajo del backend termina aquí. El trigger de la DB se encarga del resto.
+    return NextResponse.json({ 
+      message: "Usuario registrado con éxito. El perfil se está creando.", 
+      userId: data.user.id,
+      role: mappedRole 
+    }, { status: 201 });
 
   } catch (error: any) {
-    // Bloque de limpieza: Si algo falla después de crear el usuario en Auth, lo eliminamos para evitar datos huérfanos.
-    if (userIdForCleanup) {
-      try {
-        const supabaseAdminForCleanup = createClient(
-          process.env.NEXT_PUBLIC_SUPABASE_URL!,
-          process.env.SUPABASE_SERVICE_ROLE_KEY!
-        );
-        await supabaseAdminForCleanup.auth.admin.deleteUser(userIdForCleanup);
-      } catch (cleanupError: any) {
-        console.error("CRITICAL_CLEANUP_ERROR: Falló la limpieza del usuario.", cleanupError.message);
-        // Aún así devolvemos el error original al cliente
-      }
-    }
-
+    // 8. Manejo de errores inesperados (global)
     console.error("REGISTRATION_GLOBAL_ERROR:", error.message);
     return NextResponse.json(
-      { error: `ERROR_CAPTURADO: ${error.message}` },
+      { error: `ERROR_INESPERADO_EN_REGISTRO: ${error.message}` },
       { status: 500 }
     );
   }
