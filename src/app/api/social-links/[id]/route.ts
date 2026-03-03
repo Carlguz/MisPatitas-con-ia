@@ -28,7 +28,7 @@ export async function PUT(request: NextRequest, { params }: { params: { id: stri
     .from('social_links')
     .update({ platform, url })
     .eq('id', params.id)
-    .eq('userId', session.user.id); // Ensure user owns the link
+    .eq('userId', session.user.id); // Security check
 
   if (error) {
     return NextResponse.json({ error: error.message }, { status: 500 });
@@ -39,7 +39,7 @@ export async function PUT(request: NextRequest, { params }: { params: { id: stri
 
 export async function DELETE(request: NextRequest, { params }: { params: { id: string } }) {
   const cookieStore = cookies();
-    const supabase = createServerClient(
+  const supabase = createServerClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
     {

@@ -22,12 +22,13 @@ export async function PUT(request: NextRequest, { params }: { params: { id: stri
     return NextResponse.json({ error: 'No autenticado' }, { status: 401 });
   }
 
-  const { date, time, status } = await request.json();
+  const { daysOfWeek, startTime, endTime } = await request.json();
 
   const { data, error } = await supabase
     .from('schedules')
-    .update({ date, time, status })
-    .eq('id', params.id);
+    .update({ daysOfWeek, startTime, endTime })
+    .eq('id', params.id)
+    .eq('userId', session.user.id); // Ensure user owns the schedule
 
   if (error) {
     return NextResponse.json({ error: error.message }, { status: 500 });
@@ -55,7 +56,11 @@ export async function DELETE(request: NextRequest, { params }: { params: { id: s
     return NextResponse.json({ error: 'No autenticado' }, { status: 401 });
   }
 
-  const { error } = await supabase.from('schedules').delete().eq('id', params.id);
+  const { error } = await supabase
+    .from('schedules')
+    .delete()
+    .eq('id', params.id)
+    .eq('userId', session.user.id);
 
   if (error) {
     return NextResponse.json({ error: error.message }, { status: 500 });

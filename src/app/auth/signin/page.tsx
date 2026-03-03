@@ -10,7 +10,7 @@ import { Label } from '@/components/ui/label';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Loader2, Eye, EyeOff } from 'lucide-react';
-import { createClientComponentClient } from '@supabase/auth-helpers-nextjs';
+import { createBrowserClient } from '@supabase/ssr';
 
 // El tipo UserRole ya no viene de Prisma, lo definimos aquí para claridad.
 type UserRole = 'ADMIN' | 'SELLER' | 'WALKER' | 'CUSTOMER';
@@ -22,7 +22,10 @@ export default function SignInPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const router = useRouter();
-  const supabase = createClientComponentClient();
+  const supabase = createBrowserClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+  );
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();

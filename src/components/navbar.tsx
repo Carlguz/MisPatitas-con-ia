@@ -71,8 +71,6 @@ export function Navbar() {
     return () => {
       authListener?.subscription.unsubscribe();
     };
-  // We can remove supabase from dependencies as it's stable across re-renders.
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [router]);
 
   const handleSignOut = async () => {

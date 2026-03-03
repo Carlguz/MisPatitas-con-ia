@@ -46,7 +46,7 @@ export async function POST(request: NextRequest) {
   }
 
   const { name, description, price, category, images, duration, storeId } = await request.json();
-  
+
   const { data, error } = await supabase
     .from('services')
     .insert([{ name, description, price, category, images, duration, storeId, userId: session.user.id }])

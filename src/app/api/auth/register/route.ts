@@ -1,6 +1,5 @@
 
 import { createServerClient, type CookieOptions } from '@supabase/ssr';
-import { cookies } from 'next/headers';
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 
@@ -14,8 +13,8 @@ function mapRole(input: string): UserRole {
 }
 
 export async function POST(request: NextRequest) {
-  const cookieStore = cookies();
   let userIdForCleanup: string | null = null;
+  const tempResponse = new NextResponse();
 
   try {
     const { email, password, name, role, phone } = await request.json();
@@ -28,20 +27,19 @@ export async function POST(request: NextRequest) {
       throw new Error("SERVER_CONFIG_ERROR: La variable de entorno SUPABASE_SERVICE_ROLE_KEY no está configurada.");
     }
 
-    // CORRECCIÓN: Implementación correcta del manejador de cookies para @supabase/ssr
     const supabase = createServerClient(
       process.env.NEXT_PUBLIC_SUPABASE_URL!,
       process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
       {
         cookies: {
           get(name: string) {
-            return cookieStore.get(name)?.value;
+            return request.cookies.get(name)?.value;
           },
           set(name: string, value: string, options: CookieOptions) {
-            cookieStore.set({ name, value, ...options });
+            tempResponse.cookies.set({ name, value, ...options });
           },
           remove(name: string, options: CookieOptions) {
-            cookieStore.set({ name, value: '', ...options });
+            tempResponse.cookies.set({ name, value: '', ...options });
           },
         },
       }
@@ -49,7 +47,6 @@ export async function POST(request: NextRequest) {
 
     const mappedRole = mapRole(role);
 
-    // --- Paso 1: Registrar usuario en Supabase Auth ---
     const { data: { user }, error: signUpError } = await supabase.auth.signUp({
       email,
       password,
@@ -65,7 +62,6 @@ export async function POST(request: NextRequest) {
 
     userIdForCleanup = user.id;
 
-    // --- Paso 2: Lógica de roles (Vendedor/Paseador) con cliente Admin ---
     const supabaseAdmin = createClient(
       process.env.NEXT_PUBLIC_SUPABASE_URL!,
       process.env.SUPABASE_SERVICE_ROLE_KEY!
@@ -93,10 +89,14 @@ export async function POST(request: NextRequest) {
       }
     }
     
-    return NextResponse.json({ message: "Usuario registrado con éxito.", user }, { status: 201 });
+    const finalResponse = NextResponse.json({ message: "Usuario registrado con éxito.", user }, { status: 201 });
+    const cookieHeader = tempResponse.headers.get('Set-Cookie');
+    if (cookieHeader) {
+      finalResponse.headers.set('Set-Cookie', cookieHeader);
+    }
+    return finalResponse;
 
   } catch (error: any) {
-    // --- Bloque de Captura y Limpieza ---
     if (userIdForCleanup) {
       try {
         const supabaseAdminForCleanup = createClient(

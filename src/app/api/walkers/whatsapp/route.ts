@@ -1,40 +1,62 @@
 
-import { createServerClient, type CookieOptions } from '@supabase/ssr';
-import { cookies } from 'next/headers';
-import { NextRequest, NextResponse } from 'next/server';
+import { NextRequest, NextResponse } from "next/server";
+import { getServerSession } from "next-auth";
+import { authOptions } from "@/lib/auth";
+import { db } from "@/lib/db";
+import { UserRole, BookingStatus } from "@prisma/client";
 
 export async function POST(request: NextRequest) {
-  const cookieStore = cookies();
-  const supabase = createServerClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-    {
-      cookies: {
-        get(name: string) { return cookieStore.get(name)?.value },
-        set(name: string, value: string, options: CookieOptions) { cookieStore.set({ name, value, ...options }) },
-        remove(name: string, options: CookieOptions) { cookieStore.set({ name, value: '', ...options }) },
-      },
+  try {
+    const session = await getServerSession(authOptions);
+
+    if (!session?.user?.id || session.user.role !== UserRole.CUSTOMER) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
-  );
 
-  const { data: { session } } = await supabase.auth.getSession();
-  if (!session) {
-    return NextResponse.json({ error: 'No autenticado' }, { status: 401 });
+    const { walkerId } = await request.json();
+
+    if (!walkerId) {
+      return NextResponse.json({ error: "Walker ID is required" }, { status: 400 });
+    }
+
+    const walker = await db.walker.findUnique({
+      where: { id: walkerId },
+    });
+
+    if (!walker || !walker.whatsappEnabled || !walker.whatsapp) {
+      return NextResponse.json(
+        { error: "WhatsApp contact is not available for this walker" },
+        { status: 404 }
+      );
+    }
+
+    // Check if the customer has a confirmed booking with this walker
+    const booking = await db.booking.findFirst({
+      where: {
+        customerId: session.user.id,
+        service: {
+          walkerId: walkerId,
+        },
+        status: BookingStatus.CONFIRMED,
+      },
+    });
+
+    if (!booking) {
+      return NextResponse.json(
+        {
+          error:
+            "You must have a confirmed booking with this walker to get their WhatsApp number",
+        },
+        { status: 403 }
+      );
+    }
+
+    return NextResponse.json({ phoneNumber: walker.whatsapp });
+  } catch (error) {
+    console.error("Error fetching walker WhatsApp:", error);
+    return NextResponse.json(
+      { error: "Internal server error" },
+      { status: 500 }
+    );
   }
-
-  const { walkerId } = await request.json();
-
-  const { data: walker, error } = await supabase
-    .from('walkers')
-    .select('phone')
-    .eq('id', walkerId)
-    .single();
-
-  if (error || !walker) {
-    return NextResponse.json({ error: 'Paseador no encontrado' }, { status: 404 });
-  }
-
-  // Here you would typically integrate with a WhatsApp API provider
-  // For this example, we'll just return the phone number.
-  return NextResponse.json({ phoneNumber: walker.phone }, { status: 200 });
 }

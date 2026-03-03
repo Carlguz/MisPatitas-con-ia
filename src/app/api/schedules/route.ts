@@ -3,6 +3,29 @@ import { createServerClient, type CookieOptions } from '@supabase/ssr';
 import { cookies } from 'next/headers';
 import { NextRequest, NextResponse } from 'next/server';
 
+export async function GET(request: NextRequest) {
+  const cookieStore = cookies();
+  const supabase = createServerClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+    {
+      cookies: {
+        get(name: string) { return cookieStore.get(name)?.value },
+        set(name: string, value: string, options: CookieOptions) { cookieStore.set({ name, value, ...options }) },
+        remove(name: string, options: CookieOptions) { cookieStore.set({ name, value: '', ...options }) },
+      },
+    }
+  );
+
+  const { data, error } = await supabase.from('schedules').select('*');
+
+  if (error) {
+    return NextResponse.json({ error: error.message }, { status: 500 });
+  }
+
+  return NextResponse.json({ data }, { status: 200 });
+}
+
 export async function POST(request: NextRequest) {
   const cookieStore = cookies();
   const supabase = createServerClient(
@@ -22,11 +45,11 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: 'No autenticado' }, { status: 401 });
   }
 
-  const { walkerId, date, time, serviceId } = await request.json();
+  const { walkerId, daysOfWeek, startTime, endTime } = await request.json();
 
   const { data, error } = await supabase
     .from('schedules')
-    .insert([{ walkerId, date, time, serviceId, clientId: session.user.id }])
+    .insert([{ walkerId, daysOfWeek, startTime, endTime, userId: session.user.id }])
     .select();
 
   if (error) {
@@ -34,35 +57,4 @@ export async function POST(request: NextRequest) {
   }
 
   return NextResponse.json({ data }, { status: 201 });
-}
-
-export async function GET(request: NextRequest) {
-  const cookieStore = cookies();
-    const supabase = createServerClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-    {
-      cookies: {
-        get(name: string) { return cookieStore.get(name)?.value },
-        set(name: string, value: string, options: CookieOptions) { cookieStore.set({ name, value, ...options }) },
-        remove(name: string, options: CookieOptions) { cookieStore.set({ name, value: '', ...options }) },
-      },
-    }
-  );
-
-  const { searchParams } = new URL(request.url);
-  const walkerId = searchParams.get('walkerId');
-
-  let query = supabase.from('schedules').select('*');
-  if (walkerId) {
-    query = query.eq('walkerId', walkerId);
-  }
-
-  const { data, error } = await query;
-
-  if (error) {
-    return NextResponse.json({ error: error.message }, { status: 500 });
-  }
-
-  return NextResponse.json({ data }, { status: 200 });
 }
