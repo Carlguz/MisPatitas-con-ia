@@ -1,5 +1,5 @@
 
-import NextAuth from "next-auth"
+import NextAuth, { User } from "next-auth"
 import { SupabaseAdapter } from "@auth/supabase-adapter"
 import CredentialsProvider from "next-auth/providers/credentials"
 import { createClient } from "@supabase/supabase-js"
@@ -27,7 +27,7 @@ const handler = NextAuth({
         role: { label: "Role", type: "text" },
         isSignUp: { label: "Is Sign Up", type: "text" },
       },
-      async authorize(credentials) {
+      async authorize(credentials): Promise<User | null> {
         if (!credentials) {
           throw new Error("No credentials provided.");
         }
@@ -40,7 +40,6 @@ const handler = NextAuth({
              throw new Error("Missing fields for sign up.");
           }
 
-          // 1. Create the user in Supabase Auth
           const { data: authData, error: authError } = await supabase.auth.signUp({
             email: credentials.email,
             password: credentials.password,
@@ -60,15 +59,12 @@ const handler = NextAuth({
           
           const user = authData.user;
 
-          // 2. Insert the corresponding profile in the public table
-          // This is done with service_role privileges, bypassing RLS.
           let profileTable = "";
           switch(credentials.role) {
             case "CUSTOMER": profileTable = "customers"; break;
             case "WALKER": profileTable = "walkers"; break;
             case "SELLER": profileTable = "sellers"; break;
             default:
-              // If role is invalid, we should delete the created user to avoid orphans
               await supabase.auth.admin.deleteUser(user.id);
               throw new Error("Invalid user role provided.");
           }
@@ -76,25 +72,23 @@ const handler = NextAuth({
           const { error: profileError } = await supabase
             .from(profileTable)
             .insert({
-              id: user.id, // Ensure UUID matches the auth user
+              id: user.id,
               name: credentials.name,
               email: credentials.email,
               phone: credentials.phone
-              // Add any other role-specific fields here if necessary
             });
 
           if (profileError) {
             console.error("Profile Creation Error:", profileError.message);
-            // IMPORTANT: If profile creation fails, delete the auth user to prevent orphans.
             await supabase.auth.admin.deleteUser(user.id);
             throw new Error(`PROFILE_CREATION_ERROR: ${profileError.message}`);
           }
 
-          // 3. Return the user object for NextAuth
           return {
               id: user.id,
-              email: user.email,
+              email: user.email!,
               name: user.user_metadata.name,
+              role: user.user_metadata.role,
           };
         }
         
@@ -110,20 +104,17 @@ const handler = NextAuth({
           password: credentials.password,
         });
 
-        if (error) {
-          // Don't throw an error here, return null to indicate failed sign-in
+        if (error || !data.user) {
           return null;
         }
 
-        if (data.user) {
-          return {
-            id: data.user.id,
-            email: data.user.email,
-            name: data.user.user_metadata.name,
-          };
-        }
-
-        return null;
+        // We need to fetch the role from the user's metadata
+        return {
+          id: data.user.id,
+          email: data.user.email!,
+          name: data.user.user_metadata.name,
+          role: data.user.user_metadata.role,
+        };
       },
     }),
   ],
@@ -131,17 +122,19 @@ const handler = NextAuth({
     strategy: "jwt",
   },
   callbacks: {
-    async session({ session, token }) {
-      if (token) {
-        session.user.id = token.id as string;
-      }
-      return session;
-    },
     async jwt({ token, user }) {
+      // On sign-in, `user` object is available. Persist the id and role to the token.
       if (user) {
         token.id = user.id;
+        token.role = user.role;
       }
       return token;
+    },
+    async session({ session, token }) {
+      // The token has the user's id and role. Add them to the session object.
+      session.user.id = token.id as string;
+      session.user.role = token.role as string;
+      return session;
     },
   },
   pages: {
