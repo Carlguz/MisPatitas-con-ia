@@ -68,12 +68,11 @@ export default function SignUpPage() {
       const data = await response.json();
 
       if (response.ok) {
-        // Mensaje de éxito mejorado que instruye al usuario sobre el siguiente paso.
-        setSuccess("¡Cuenta creada! Por favor, revisa tu correo electrónico para confirmar tu cuenta antes de iniciar sesión.");
-        // Ya no redirigimos automáticamente. El usuario debe verificar su email primero.
-        // setTimeout(() => {
-        //   router.push("/auth/signin");
-        // }, 3000);
+        // Mensaje de éxito y redirección automática al inicio de sesión.
+        setSuccess("¡Cuenta creada con éxito! Redirigiendo al inicio de sesión...");
+        setTimeout(() => {
+          router.push("/auth/signin");
+        }, 2000); // 2 segundos de espera para que el usuario lea el mensaje.
       } else {
         setError(data.error || "Error al crear la cuenta. Es posible que el email ya esté en uso.");
       }
@@ -105,22 +104,15 @@ export default function SignUpPage() {
           <CardDescription>Únete a la comunidad PetConnect</CardDescription>
         </CardHeader>
         <CardContent>
-          {/* Si el registro fue exitoso, mostramos solo el mensaje y un link para iniciar sesión */} 
+          {/* Si el registro fue exitoso, mostramos el mensaje de éxito y luego redirigimos */} 
           {success ? (
             <div className="text-center space-y-4">
                 <Alert className="border-green-200 bg-green-50">
                     <AlertDescription className="text-green-800">{success}</AlertDescription>
                 </Alert>
-                <p className="text-sm text-gray-600">
-                    ¿Ya confirmaste tu cuenta?{" "}
-                    <Link href="/auth/signin" className="text-orange-600 hover:underline">
-                        Inicia sesión aquí
-                    </Link>
-                </p>
             </div>
           ) : (
             <form onSubmit={handleSubmit} className="space-y-4">
-              {/* ... el resto del formulario no cambia ... */}
               <div className="space-y-2">
                 <Label htmlFor="name">Nombre Completo</Label>
                 <Input id="name" type="text" value={formData.name} onChange={(e) => handleChange("name", e.target.value)} placeholder="Juan Pérez" required />
@@ -150,8 +142,7 @@ export default function SignUpPage() {
                 <div className="relative">
                   <Input id="password" type={showPassword ? "text" : "password"} value={formData.password} onChange={(e) => handleChange("password", e.target.value)} placeholder="••••••••" required />
                   <Button type="button" variant="ghost" size="sm" className="absolute right-0 top-0 h-full px-3 py-2 hover:bg-transparent" onClick={() => setShowPassword(!showPassword)}>
-                    {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-                  </Button>
+                    {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}</Button>
                 </div>
               </div>
               <div className="space-y-2">
@@ -159,8 +150,7 @@ export default function SignUpPage() {
                 <div className="relative">
                   <Input id="confirmPassword" type={showConfirmPassword ? "text" : "password"} value={formData.confirmPassword} onChange={(e) => handleChange("confirmPassword", e.target.value)} placeholder="••••••••" required />
                   <Button type="button" variant="ghost" size="sm" className="absolute right-0 top-0 h-full px-3 py-2 hover:bg-transparent" onClick={() => setShowConfirmPassword(!showConfirmPassword)}>
-                    {showConfirmPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-                  </Button>
+                    {showConfirmPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}</Button>
                 </div>
               </div>
               {error && <Alert variant="destructive"><AlertDescription>{error}</AlertDescription></Alert>}
