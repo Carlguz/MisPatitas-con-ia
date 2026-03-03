@@ -4,6 +4,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion"
 import { HelpCircle, Users, Dog, Store, CreditCard, Shield, Clock } from "lucide-react"
 
+// Trigger Vercel redeployment
 export default function FAQPage() {
   return (
     <div className="min-h-screen bg-gray-50">

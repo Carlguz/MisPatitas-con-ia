@@ -1,112 +1,70 @@
-import { NextRequest, NextResponse } from "next/server";
-import { createRouteHandlerClient } from "@supabase/auth-helpers-nextjs";
-import { cookies } from "next/headers";
-import { db } from "@/lib/db";
-import { UserRole } from "@prisma/client";
 
-// Helper para verificar la propiedad del enlace
-const getWalkerAndSocialLink = async (session: any, linkId: string) => {
-  const user = await db.user.findUnique({ where: { id: session.user.id }, select: { role: true }});
-  if (user?.role !== UserRole.WALKER) {
-    return { error: new NextResponse(JSON.stringify({ error: "Forbidden: Not a Walker" }), { status: 403 }) };
+import { createServerClient, type CookieOptions } from '@supabase/ssr';
+import { cookies } from 'next/headers';
+import { NextRequest, NextResponse } from 'next/server';
+
+export async function PUT(request: NextRequest, { params }: { params: { id: string } }) {
+  const cookieStore = cookies();
+  const supabase = createServerClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+    {
+      cookies: {
+        get(name: string) { return cookieStore.get(name)?.value },
+        set(name: string, value: string, options: CookieOptions) { cookieStore.set({ name, value, ...options }) },
+        remove(name: string, options: CookieOptions) { cookieStore.set({ name, value: '', ...options }) },
+      },
+    }
+  );
+
+  const { data: { session } } = await supabase.auth.getSession();
+  if (!session) {
+    return NextResponse.json({ error: 'No autenticado' }, { status: 401 });
   }
 
-  const socialLink = await db.socialLink.findFirst({
-    where: { id: linkId, walker: { userId: session.user.id } },
-  });
+  const { platform, url } = await request.json();
 
-  if (!socialLink) {
-    return { error: new NextResponse(JSON.stringify({ error: "Social link not found or access denied" }), { status: 404 }) };
+  const { data, error } = await supabase
+    .from('social_links')
+    .update({ platform, url })
+    .eq('id', params.id)
+    .eq('userId', session.user.id); // Ensure user owns the link
+
+  if (error) {
+    return NextResponse.json({ error: error.message }, { status: 500 });
   }
 
-  return { socialLink };
+  return NextResponse.json({ data }, { status: 200 });
 }
 
-// GET: Obtener un enlace social específico (Protegido)
-export async function GET(
-  request: NextRequest,
-  { params }: { params: { id: string } }
-) {
-  const supabase = createRouteHandlerClient({ cookies });
-  try {
-    const { data: { session } } = await supabase.auth.getSession();
-    if (!session) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+export async function DELETE(request: NextRequest, { params }: { params: { id: string } }) {
+  const cookieStore = cookies();
+    const supabase = createServerClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+    {
+      cookies: {
+        get(name: string) { return cookieStore.get(name)?.value },
+        set(name: string, value: string, options: CookieOptions) { cookieStore.set({ name, value, ...options }) },
+        remove(name: string, options: CookieOptions) { cookieStore.set({ name, value: '', ...options }) },
+      },
     }
+  );
 
-    const { error, socialLink } = await getWalkerAndSocialLink(session, params.id);
-    if (error) return error;
-
-    return NextResponse.json({ socialLink });
-  } catch (error) {
-    console.error("Error fetching social link:", error);
-    return NextResponse.json({ error: "Internal server error" }, { status: 500 });
+  const { data: { session } } = await supabase.auth.getSession();
+  if (!session) {
+    return NextResponse.json({ error: 'No autenticado' }, { status: 401 });
   }
-}
 
-// PUT: Actualizar un enlace social (Protegido)
-export async function PUT(
-  request: NextRequest,
-  { params }: { params: { id: string } }
-) {
-  const supabase = createRouteHandlerClient({ cookies });
-  try {
-    const { data: { session } } = await supabase.auth.getSession();
-    if (!session) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
+  const { error } = await supabase
+    .from('social_links')
+    .delete()
+    .eq('id', params.id)
+    .eq('userId', session.user.id);
 
-    const { error } = await getWalkerAndSocialLink(session, params.id);
-    if (error) return error;
-
-    const body = await request.json();
-    const { platform, url, isActive } = body;
-
-    if (url !== undefined) {
-      try {
-        new URL(url);
-      } catch {
-        return NextResponse.json({ error: "Invalid URL format" }, { status: 400 });
-      }
-    }
-
-    const updateData: any = {};
-    if (platform !== undefined) updateData.platform = platform.toLowerCase();
-    if (url !== undefined) updateData.url = url;
-    if (isActive !== undefined) updateData.isActive = isActive;
-
-    const updatedLink = await db.socialLink.update({
-      where: { id: params.id },
-      data: updateData,
-    });
-
-    return NextResponse.json(updatedLink);
-  } catch (error) {
-    console.error("Error updating social link:", error);
-    return NextResponse.json({ error: "Internal server error" }, { status: 500 });
+  if (error) {
+    return NextResponse.json({ error: error.message }, { status: 500 });
   }
-}
 
-// DELETE: Eliminar un enlace social (Protegido)
-export async function DELETE(
-  request: NextRequest,
-  { params }: { params: { id: string } }
-) {
-  const supabase = createRouteHandlerClient({ cookies });
-  try {
-    const { data: { session } } = await supabase.auth.getSession();
-    if (!session) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
-
-    const { error } = await getWalkerAndSocialLink(session, params.id);
-    if (error) return error;
-
-    await db.socialLink.delete({ where: { id: params.id } });
-
-    return NextResponse.json({ message: "Social link deleted successfully" });
-  } catch (error) {
-    console.error("Error deleting social link:", error);
-    return NextResponse.json({ error: "Internal server error" }, { status: 500 });
-  }
+  return NextResponse.json({ message: 'Enlace social eliminado' }, { status: 200 });
 }

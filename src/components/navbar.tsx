@@ -1,6 +1,6 @@
 'use client'
 
-import { createClientComponentClient } from '@supabase/auth-helpers-nextjs'
+import { createBrowserClient } from '@supabase/ssr'
 import { useRouter } from 'next/navigation'
 import { useEffect, useState } from 'react'
 import Link from 'next/link'
@@ -16,115 +16,100 @@ import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
 import { User, Store, Dog, Users, LogOut, Settings } from 'lucide-react'
 import { CurrencySelector } from '@/components/currency-selector'
 
-// Definimos el tipo UserRole directamente aquí
-export type UserRole = "ADMIN" | "SELLER" | "WALKER" | "CUSTOMER";
+export type UserRole = "ADMIN" | "SELLER" | "WALKER" | "CLIENT"; // Changed CUSTOMER to CLIENT for consistency
 
-// Definimos una interfaz para el perfil del usuario
 interface UserProfile {
   name?: string | null;
-  avatar?: string | null;
+  avatar_url?: string | null;
   role?: UserRole | null;
 }
 
 export function Navbar() {
-  const supabase = createClientComponentClient()
+  // Use the modern createBrowserClient
+  const supabase = createBrowserClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+  );
   const router = useRouter()
-  const [session, setSession] = useState<any>(null)
+  const [session, setSession] = useState<any>(null) // Consider using a more specific type
   const [userProfile, setUserProfile] = useState<UserProfile | null>(null)
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
-    const getSessionAndProfile = async () => {
-      const { data: { session },} = await supabase.auth.getSession();
-      setSession(session)
+    const fetchUser = async () => {
+      const { data: { session } } = await supabase.auth.getSession();
+      setSession(session);
 
       if (session) {
         const { data: profile, error } = await supabase
           .from('profiles')
           .select('name, avatar_url, role')
           .eq('id', session.user.id)
-          .single()
-        
+          .single();
+
         if (error) {
-          console.error('Error fetching profile:', error)
-        } else if (profile) {
-          setUserProfile({
-            name: profile.name,
-            avatar: profile.avatar_url,
-            role: profile.role as UserRole,
-          })
-        }
-      }
-      setLoading(false)
-    }
-
-    getSessionAndProfile()
-
-    const { data: authListener } = supabase.auth.onAuthStateChange(
-      async (event, session) => {
-        setSession(session)
-        if (session) {
-            const { data: profile, error } = await supabase
-              .from('profiles')
-              .select('name, avatar_url, role')
-              .eq('id', session.user.id)
-              .single()
-
-            if (error) {
-                console.error('Error fetching profile:', error)
-                setUserProfile(null)
-            } else if (profile) {
-                setUserProfile({
-                  name: profile.name,
-                  avatar: profile.avatar_url,
-                  role: profile.role as UserRole,
-                })
-            }
+          console.error('Error fetching profile:', error.message);
+          setUserProfile(null);
         } else {
-            setUserProfile(null)
+          setUserProfile(profile as UserProfile);
         }
       }
-    )
+      setLoading(false);
+    };
+
+    fetchUser();
+
+    const { data: authListener } = supabase.auth.onAuthStateChange((event, session) => {
+        // Re-fetch user data on auth state change
+        fetchUser();
+        // Additionally, you can refresh the page to ensure server components are updated
+        if (event === 'SIGNED_IN' || event === 'SIGNED_OUT') {
+            router.refresh();
+        }
+    });
 
     return () => {
-      authListener?.subscription.unsubscribe()
-    }
-  }, [supabase])
+      authListener?.subscription.unsubscribe();
+    };
+  // We can remove supabase from dependencies as it's stable across re-renders.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [router]);
 
   const handleSignOut = async () => {
     await supabase.auth.signOut()
+    // router.refresh() will be triggered by onAuthStateChange, so this is optional
     router.push('/')
   }
 
-  const getRoleIcon = (role: UserRole) => {
+  const getRoleIcon = (role?: UserRole | null) => {
     switch (role) {
       case 'SELLER': return <Store className="h-4 w-4" />
       case 'WALKER': return <Dog className="h-4 w-4" />
-      case 'CUSTOMER': return <Users className="h-4 w-4" />
+      case 'CLIENT': return <Users className="h-4 w-4" /> // Changed from CUSTOMER
       case 'ADMIN': return <Settings className="h-4 w-4" />
       default: return <User className="h-4 w-4" />
     }
   }
 
-  const getRoleName = (role: UserRole) => {
+  const getRoleName = (role?: UserRole | null) => {
     switch (role) {
       case 'SELLER': return 'Vendedor'
       case 'WALKER': return 'Paseador'
-      case 'CUSTOMER': return 'Cliente'
+      case 'CLIENT': return 'Cliente' // Changed from CUSTOMER
       case 'ADMIN': return 'Administrador'
       default: return 'Usuario'
     }
   }
 
-    const getDashboardLink = (role: UserRole | null | undefined) => {
-        switch (role) {
-            case 'SELLER': return '/seller'
-            case 'WALKER': return '/walker'
-            case 'CUSTOMER': return '/customer'
-            case 'ADMIN': return '/admin'
-            default: return '/'
-        }
-    }
+  const getDashboardLink = (role?: UserRole | null) => {
+      switch (role) {
+          case 'SELLER': return '/seller'
+          case 'WALKER': return '/walker'
+          case 'CLIENT': return '/customer'
+          case 'ADMIN': return '/admin'
+          default: return '/'
+      }
+  }
 
   if (loading) {
     return (
@@ -132,7 +117,7 @@ export function Navbar() {
         <div className="container mx-auto px-4">
           <div className="flex justify-between items-center h-16">
             <Link href="/" className="text-2xl font-bold text-orange-600">
-              PetConnect
+              MisPatitas
             </Link>
             <div className="w-8 h-8 bg-gray-200 rounded-full animate-pulse"></div>
           </div>
@@ -146,7 +131,7 @@ export function Navbar() {
       <div className="container mx-auto px-4">
         <div className="flex justify-between items-center h-16">
           <Link href="/" className="text-2xl font-bold text-orange-600">
-            PetConnect
+            MisPatitas
           </Link>
 
           <div className="flex items-center gap-4">
@@ -157,7 +142,7 @@ export function Navbar() {
                 <DropdownMenuTrigger asChild>
                   <Button variant="ghost" className="relative h-8 w-8 rounded-full">
                     <Avatar className="h-8 w-8">
-                      <AvatarImage src={userProfile.avatar || undefined} alt={userProfile.name || ""} />
+                      <AvatarImage src={userProfile.avatar_url || undefined} alt={userProfile.name || ""} />
                       <AvatarFallback>
                         {userProfile.name?.charAt(0).toUpperCase() || 'U'}
                       </AvatarFallback>
