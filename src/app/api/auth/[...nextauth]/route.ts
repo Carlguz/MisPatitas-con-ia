@@ -74,7 +74,6 @@ const handler = NextAuth({
             .insert({
               id: user.id,
               name: credentials.name,
-              email: credentials.email,
               phone: credentials.phone
             });
 
