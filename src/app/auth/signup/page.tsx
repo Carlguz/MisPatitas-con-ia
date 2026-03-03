@@ -1,9 +1,9 @@
-
 "use client";
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
+import { signIn } from "next-auth/react"; // Import signIn
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -51,33 +51,32 @@ export default function SignUpPage() {
     }
 
     try {
-      const response = await fetch("/api/auth/register", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          email: formData.email,
-          password: formData.password,
-          name: formData.name,
-          role: formData.role,
-          phone: formData.phone
-        }),
+      // Use signIn from next-auth instead of fetch
+      const result = await signIn('credentials', {
+        redirect: false, // Prevent automatic redirection
+        email: formData.email,
+        password: formData.password,
+        name: formData.name,
+        phone: formData.phone,
+        role: formData.role,
+        isSignUp: 'true' // Flag to indicate this is a sign-up
       });
 
-      const data = await response.json();
-
-      if (response.ok) {
-        // Mensaje de éxito y redirección automática al inicio de sesión.
+      if (result?.error) {
+        // Handle errors returned from the authorize function
+        setError(result.error || "Error al crear la cuenta. Es posible que el email ya esté en uso.");
+      } else if (!result?.ok) {
+        setError("Ocurrió un error inesperado. Inténtalo de nuevo.");
+      } else {
+        // If signIn is successful, the user is created.
         setSuccess("¡Cuenta creada con éxito! Redirigiendo al inicio de sesión...");
         setTimeout(() => {
           router.push("/auth/signin");
-        }, 2000); // 2 segundos de espera para que el usuario lea el mensaje.
-      } else {
-        setError(data.error || "Error al crear la cuenta. Es posible que el email ya esté en uso.");
+        }, 2000); // Wait 2 seconds for the user to read the message.
       }
     } catch (error) {
-      setError("Ocurrió un error inesperado. Inténtalo de nuevo.");
+      // This might catch network errors etc.
+      setError("Ocurrió un error de red. Por favor, comprueba tu conexión.");
     } finally {
       setLoading(false);
     }
@@ -104,7 +103,6 @@ export default function SignUpPage() {
           <CardDescription>Únete a la comunidad PetConnect</CardDescription>
         </CardHeader>
         <CardContent>
-          {/* Si el registro fue exitoso, mostramos el mensaje de éxito y luego redirigimos */} 
           {success ? (
             <div className="text-center space-y-4">
                 <Alert className="border-green-200 bg-green-50">
