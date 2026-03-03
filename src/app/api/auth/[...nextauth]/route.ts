@@ -1,15 +1,15 @@
-
-import NextAuth, { User } from "next-auth"
-import { SupabaseAdapter } from "@auth/supabase-adapter"
-import CredentialsProvider from "next-auth/providers/credentials"
-import { createClient } from "@supabase/supabase-js"
-import { Adapter } from "next-auth/adapters"
+import NextAuth, { User } from "next-auth";
+import { SupabaseAdapter } from "@auth/supabase-adapter";
+import CredentialsProvider from "next-auth/providers/credentials";
+import { createClient } from "@supabase/supabase-js";
+import { Adapter } from "next-auth/adapters";
+import { UserRole } from '@prisma/client'; // Importar el tipo UserRole
 
 // Use the SERVICE_ROLE_KEY for admin-level access
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
   process.env.SUPABASE_SERVICE_ROLE_KEY!
-)
+);
 
 const handler = NextAuth({
   adapter: SupabaseAdapter({
@@ -32,12 +32,10 @@ const handler = NextAuth({
           throw new Error("No credentials provided.");
         }
 
-        // =================================================================
         // SIGN UP LOGIC
-        // =================================================================
         if (credentials.isSignUp === 'true') {
           if (!credentials.email || !credentials.password || !credentials.name || !credentials.role) {
-             throw new Error("Missing fields for sign up.");
+            throw new Error("Missing fields for sign up.");
           }
 
           const { data: authData, error: authError } = await supabase.auth.signUp({
@@ -56,11 +54,11 @@ const handler = NextAuth({
             console.error("Supabase Sign Up Error:", authError?.message);
             throw new Error(`AUTH_SIGNUP_ERROR: ${authError?.message || "Could not create user."}`);
           }
-          
+
           const user = authData.user;
 
           let profileTable = "";
-          switch(credentials.role) {
+          switch (credentials.role) {
             case "CUSTOMER": profileTable = "customers"; break;
             case "WALKER": profileTable = "walkers"; break;
             case "SELLER": profileTable = "sellers"; break;
@@ -68,14 +66,10 @@ const handler = NextAuth({
               await supabase.auth.admin.deleteUser(user.id);
               throw new Error("Invalid user role provided.");
           }
-          
+
           const { error: profileError } = await supabase
             .from(profileTable)
-            .insert({
-              id: user.id,
-              name: credentials.name,
-              phone: credentials.phone
-            });
+            .insert({ id: user.id, name: credentials.name, phone: credentials.phone });
 
           if (profileError) {
             console.error("Profile Creation Error:", profileError.message);
@@ -84,20 +78,18 @@ const handler = NextAuth({
           }
 
           return {
-              id: user.id,
-              email: user.email!,
-              name: user.user_metadata.name,
-              role: user.user_metadata.role,
+            id: user.id,
+            email: user.email!,
+            name: user.user_metadata.name,
+            role: user.user_metadata.role as UserRole, // Cast to UserRole
           };
         }
-        
-        // =================================================================
+
         // SIGN IN LOGIC
-        // =================================================================
         if (!credentials.email || !credentials.password) {
           throw new Error("Email and password are required for sign in.");
         }
-        
+
         const { data, error } = await supabase.auth.signInWithPassword({
           email: credentials.email,
           password: credentials.password,
@@ -107,12 +99,11 @@ const handler = NextAuth({
           return null;
         }
 
-        // We need to fetch the role from the user's metadata
         return {
           id: data.user.id,
           email: data.user.email!,
           name: data.user.user_metadata.name,
-          role: data.user.user_metadata.role,
+          role: data.user.user_metadata.role as UserRole, // Cast to UserRole
         };
       },
     }),
@@ -122,7 +113,6 @@ const handler = NextAuth({
   },
   callbacks: {
     async jwt({ token, user }) {
-      // On sign-in, `user` object is available. Persist the id and role to the token.
       if (user) {
         token.id = user.id;
         token.role = user.role;
@@ -130,9 +120,8 @@ const handler = NextAuth({
       return token;
     },
     async session({ session, token }) {
-      // The token has the user's id and role. Add them to the session object.
       session.user.id = token.id as string;
-      session.user.role = token.role as string;
+      session.user.role = token.role as UserRole;
       return session;
     },
   },
@@ -140,6 +129,6 @@ const handler = NextAuth({
     signIn: '/auth/signin',
   },
   debug: process.env.NODE_ENV === 'development',
-})
+});
 
-export { handler as GET, handler as POST }
+export { handler as GET, handler as POST };
